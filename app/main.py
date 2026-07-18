@@ -1,0 +1,36 @@
+"""
+app/main.py
+───────────
+FastAPI application entry point for Step 1.
+
+Only one endpoint is exposed: GET /health.
+Authentication, public form endpoints, and admin APIs are added in later steps.
+"""
+
+from fastapi import FastAPI
+
+app = FastAPI(
+    title="Tapply API",
+    version="0.1.0",
+    description="Multi-tenant SaaS backend for Tapply.",
+    # Docs disabled until auth is in place (Step 2).
+    docs_url=None,
+    redoc_url=None,
+    openapi_url=None,
+)
+
+
+@app.get(
+    "/health",
+    summary="Health check",
+    tags=["infra"],
+    response_model=dict,
+)
+def health_check() -> dict:
+    """
+    Returns ``{"status": "ok"}`` when the server is up.
+
+    This endpoint is intentionally unauthenticated and does not touch the
+    database — it is safe to use as a load-balancer / readiness probe target.
+    """
+    return {"status": "ok"}
