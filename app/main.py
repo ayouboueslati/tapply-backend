@@ -34,3 +34,8 @@ def health_check() -> dict:
     database — it is safe to use as a load-balancer / readiness probe target.
     """
     return {"status": "ok"}
+
+from app.api.routers import organizations, stands
+
+app.include_router(organizations.router)
+app.include_router(stands.router)

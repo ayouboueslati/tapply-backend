@@ -27,6 +27,9 @@ class Settings(BaseSettings):
     # Separate DB for the test suite.  Must have migrations already applied.
     TEST_DATABASE_URL: str = ""
 
+    # Clerk backend API key
+    CLERK_SECRET_KEY: str = ""
+
     model_config = {
         "env_file": ".env",
         "env_file_encoding": "utf-8",
