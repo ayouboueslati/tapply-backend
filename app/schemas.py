@@ -28,3 +28,11 @@ class StandResponse(BaseModel):
     default_branch: str | None
     
     model_config = ConfigDict(from_attributes=True)
+
+class TapContextResponse(BaseModel):
+    form_fields: list[dict]
+    default_branch: str | None
+
+class TapSubmissionCreate(BaseModel):
+    consent: bool
+    data: dict
