@@ -14,12 +14,18 @@ RLS note:
 
 import uuid
 from datetime import datetime
+from typing import List
 
 from sqlalchemy import DateTime, Text, func, text
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
+
+# Default status labels applied to every new org.  Must stay in sync with
+# the server_default in migration 0003 and with Step 3's hardcoded
+# 'to_contact' initial submission status.
+_DEFAULT_STATUS_LABELS: List[str] = ["to_contact", "contacted"]
 
 
 class Organization(Base):
@@ -41,6 +47,20 @@ class Organization(Base):
         nullable=False,
         server_default=text("'active'"),
         doc="Billing state: 'active' | 'trialing' | 'past_due' | 'canceled'.",
+    )
+    status_labels: Mapped[List[str]] = mapped_column(
+        JSONB,
+        nullable=False,
+        # Server-side default matches migration 0003 (::jsonb cast applied there).
+        server_default=text("'[\"to_contact\",\"contacted\"]'::jsonb"),
+        # Python-side default so ORM-created instances have the correct value
+        # before the first flush / refresh.
+        default=lambda: list(_DEFAULT_STATUS_LABELS),
+        doc=(
+            "Ordered list of valid submission status labels for this org. "
+            "Managed via PATCH /organizations/me/status-labels (org_owner only). "
+            "Application-level validation — not a DB enum — see DESIGN.md."
+        ),
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

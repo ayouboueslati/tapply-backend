@@ -45,9 +45,10 @@ def health_check() -> dict:
     """
     return {"status": "ok"}
 
-from app.api.routers import organizations, stands, tap
+from app.api.routers import organizations, stands, tap, submissions
 
 app.include_router(organizations.router)
 app.include_router(stands.router)
 app.include_router(tap.router)
+app.include_router(submissions.router)
 
