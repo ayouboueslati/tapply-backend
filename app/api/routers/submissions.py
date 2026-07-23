@@ -172,6 +172,5 @@ def update_submission(
         submission.branch = body.branch
 
     session.commit()
-    session.refresh(submission)
 
     return submission
