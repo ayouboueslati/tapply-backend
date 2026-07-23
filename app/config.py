@@ -30,6 +30,13 @@ class Settings(BaseSettings):
     # Clerk backend API key
     CLERK_SECRET_KEY: str = ""
 
+    # Runtime environment.  Set to "production" in prod to disable /docs.
+    # Accepted values: development | staging | production
+    ENV: str = "development"
+
+    # Comma-separated list of allowed frontend origins for CORS
+    FRONTEND_URLS: str = "http://localhost:3000"
+
     model_config = {
         "env_file": ".env",
         "env_file_encoding": "utf-8",

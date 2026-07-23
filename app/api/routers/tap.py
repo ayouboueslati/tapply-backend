@@ -1,9 +1,9 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Request
+from fastapi import APIRouter, Depends, HTTPException, status, Request, Response
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 from app.db.session import set_org_context
 from app.api.deps import get_db
-from app.schemas import TapContextResponse, TapSubmissionCreate
+from app.schemas import TapContextResponse, TapSubmissionCreate, TapSubmissionResponse
 import json
 
 router = APIRouter(prefix="/tap", tags=["tap"])
@@ -37,7 +37,7 @@ async def verify_payload_size(request: Request):
 
 def _resolve_context(session: Session, token: str):
     row = session.execute(
-        text("SELECT org_id, stand_id, default_branch, form_fields FROM auth.resolve_card_context(:token)"),
+        text("SELECT org_id, stand_id, default_branch, form_fields, org_name FROM auth.resolve_card_context(:token)"),
         {"token": token},
     ).one_or_none()
 
@@ -51,16 +51,18 @@ def _resolve_context(session: Session, token: str):
 def get_tap_context(request: Request, token: str, session: Session = Depends(get_db)):
     row = _resolve_context(session, token)
     return TapContextResponse(
+        org_name=row.org_name,
         form_fields=row.form_fields,
         default_branch=row.default_branch
     )
 
-@router.post("/{token}/submit", status_code=status.HTTP_201_CREATED)
+@router.post("/{token}/submit", response_model=TapSubmissionResponse)
 @limiter.limit("30/minute")
 def submit_tap(
     request: Request,
     token: str,
     payload: TapSubmissionCreate,
+    response: Response,
     session: Session = Depends(get_db),
     _ = Depends(verify_payload_size)
 ):
@@ -91,23 +93,41 @@ def submit_tap(
     set_org_context(session, row.org_id)
 
     # Insert submission
-    session.execute(
+    result = session.execute(
         text("""
-            INSERT INTO submissions (card_id, org_id, status, branch, data)
+            INSERT INTO submissions (card_id, org_id, status, branch, data, idempotency_key)
             VALUES (
                 (SELECT id FROM cards WHERE token = :token),
                 :org_id,
                 'to_contact',
                 :branch,
-                :data
+                :data,
+                :idempotency_key
             )
+            ON CONFLICT (org_id, idempotency_key) DO UPDATE SET id = submissions.id
+            RETURNING id, (xmax = 0) AS inserted
         """),
         {
             "token": token,
             "org_id": row.org_id,
             "branch": branch,
-            "data": json.dumps(payload.data)
+            "data": json.dumps(payload.data),
+            "idempotency_key": str(payload.idempotency_key)
         }
     )
+    
+    # xmax = 0 means this row was just inserted by this transaction, not an existing row 
+    # touched by the ON CONFLICT UPDATE — this is how we distinguish a genuine new submission 
+    # from an idempotent retry.
+    inserted_row = result.one()
+    submission_id = inserted_row.id
+    inserted = inserted_row.inserted
+    
     session.commit()
-    return {"status": "ok"}
+    
+    if inserted:
+        response.status_code = status.HTTP_201_CREATED
+    else:
+        response.status_code = status.HTTP_200_OK
+        
+    return {"status": "ok", "submission_id": submission_id}

@@ -21,19 +21,43 @@ def get_db() -> Generator[Session, None, None]:
 def get_clerk_client() -> Clerk:
     return Clerk(bearer_auth=settings.CLERK_SECRET_KEY)
 
-def get_clerk_email(credentials: HTTPAuthorizationCredentials = Depends(security)) -> str:
+from fastapi import Request
+from clerk_backend_api.security.types import AuthenticateRequestOptions
+from typing import Mapping
+
+class _ClerkRequestWrap:
+    def __init__(self, headers: Mapping[str, str], url: str):
+        self.headers = headers
+        self.url = url
+
+def get_clerk_email(
+    request: Request,
+    credentials: HTTPAuthorizationCredentials = Depends(security)
+) -> str:
     """
     Verifies the Clerk JWT token and extracts the user's email.
     """
-    token = credentials.credentials
     clerk = get_clerk_client()
     
     try:
-        # We assume clerk_backend_api has a verify_token method or similar
-        # Since the actual verification logic requires JWKS, this is typically
-        # done using the clerk client. For now, we stub the API call if testing,
-        # but the test suite uses dependency_overrides.
-        raise NotImplementedError("Real clerk verification requires JWKS/API keys")
+        clerk_req = _ClerkRequestWrap(
+            headers=request.headers,
+            url=str(request.url)
+        )
+        req_state = clerk.authenticate_request(clerk_req, AuthenticateRequestOptions())
+        
+        if not req_state.is_signed_in:
+            raise Exception(req_state.message or "Not signed in")
+            
+        user_id = req_state.payload.get("sub")
+        if not user_id:
+            raise Exception("No user ID found in token")
+            
+        user = clerk.users.get(user_id=user_id)
+        if not user or not user.email_addresses:
+            raise Exception("User has no email address")
+            
+        return user.email_addresses[0].email_address
 
     except Exception as e:
         raise HTTPException(

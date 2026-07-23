@@ -44,9 +44,10 @@ from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_db, get_clerk_email, get_current_staff_user, StaffUserContext
+from app.models.form_schema import FormSchema
 from app.models.organization import Organization
 from app.models.submission import Submission
-from app.schemas import OrganizationCreate, StatusLabelsResponse, StatusLabelsUpdate
+from app.schemas import OrganizationCreate, StatusLabelsResponse, StatusLabelsUpdate, StaffContextResponse
 
 # Maximum allowed length for a single status label (dashboard-facing text).
 _MAX_LABEL_LENGTH = 50
@@ -80,6 +81,37 @@ def create_organization(
     session.commit()
 
     return {"org_id": row.org_id}
+
+
+# ── Staff Context endpoint ────────────────────────────────────────────────────
+
+@router.get("/me/context", response_model=StaffContextResponse)
+def get_staff_context(
+    staff: StaffUserContext = Depends(get_current_staff_user),
+    email: str = Depends(get_clerk_email),
+    session: Session = Depends(get_db),
+):
+    """
+    Returns the authenticated staff user's email and organization name.
+    Useful for the frontend dashboard placeholder.
+    """
+    org = session.get(Organization, staff.org_id)
+    if not org:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Organization not found",
+        )
+        
+    form_fields = session.scalar(
+        select(FormSchema.fields).where(FormSchema.org_id == staff.org_id)
+    )
+    
+    return StaffContextResponse(
+        email=email, 
+        org_name=org.name,
+        role=staff.role,
+        form_fields=form_fields if form_fields is not None else []
+    )
 
 
 # ── Status label endpoints ────────────────────────────────────────────────────
@@ -199,18 +231,18 @@ def update_status_labels(
         ).all()
 
         if in_use:
+            labels_str = ", ".join(f'"{label}"' for label in sorted(in_use))
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail=(
-                    f"Cannot remove label(s) {sorted(in_use)!r} — they are still "
-                    "referenced by existing submissions.  Migrate those submissions "
-                    "to a different status first, then retry."
+                    f"Cannot remove {labels_str}. This label is still "
+                    "referenced by existing submissions. Please move those submissions "
+                    "to a different status first, then try again."
                 ),
             )
 
     # ── Write — only reached if all checks pass ───────────────────────────────
     org.status_labels = new_labels
     session.commit()
-    session.refresh(org)
 
-    return StatusLabelsResponse(status_labels=org.status_labels)
+    return StatusLabelsResponse(status_labels=new_labels)

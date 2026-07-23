@@ -89,6 +89,7 @@ def test_get_tap_valid_token(client, test_db_session):
     response = client.get(f"/tap/{token}")
     assert response.status_code == 200
     data = response.json()
+    assert data["org_name"] == "Org A"
     assert data["default_branch"] == "Branch A"
     assert data["form_fields"] == form_fields
 
@@ -102,6 +103,7 @@ def test_post_tap_submit_success_with_branch_precedence(client, test_db_session)
     
     # 1. Submit using default_branch
     payload_1 = {
+        "idempotency_key": str(uuid.uuid4()),
         "consent": True,
         "data": {"email": "test1@example.com"}
     }
@@ -110,6 +112,7 @@ def test_post_tap_submit_success_with_branch_precedence(client, test_db_session)
     
     # 2. Submit with explicit branch override
     payload_2 = {
+        "idempotency_key": str(uuid.uuid4()),
         "consent": True,
         "data": {"email": "test2@example.com", "branch": "Override Branch"}
     }
@@ -130,6 +133,7 @@ def test_post_tap_submit_missing_consent(client, test_db_session):
     _, _, token = create_org_stand_card(test_db_session, "Org A", "user@test.com", "Branch A", form_fields)
     
     payload = {
+        "idempotency_key": str(uuid.uuid4()),
         "consent": False,
         "data": {"email": "test@example.com"}
     }
@@ -138,7 +142,7 @@ def test_post_tap_submit_missing_consent(client, test_db_session):
     assert "Consent is required" in response.text
     
     # Missing consent completely will fail Pydantic schema validation (422)
-    payload_missing = {"data": {"email": "test@example.com"}}
+    payload_missing = {"idempotency_key": str(uuid.uuid4()), "data": {"email": "test@example.com"}}
     response = client.post(f"/tap/{token}/submit", json=payload_missing)
     assert response.status_code == 422
 
@@ -147,6 +151,7 @@ def test_post_tap_submit_missing_required_fields(client, test_db_session):
     _, _, token = create_org_stand_card(test_db_session, "Org A", "user@test.com", "Branch A", form_fields)
     
     payload = {
+        "idempotency_key": str(uuid.uuid4()),
         "consent": True,
         "data": {"email": "test@example.com"} # missing phone
     }
@@ -162,6 +167,7 @@ def test_post_tap_submit_client_org_id_ignored(client, test_db_session):
     
     fake_org_id = str(uuid.uuid4())
     payload = {
+        "idempotency_key": str(uuid.uuid4()),
         "consent": True,
         "data": {"email": "test@example.com", "org_id": fake_org_id}
     }
@@ -178,7 +184,7 @@ def test_cross_org_isolation(client, test_db_session):
     org_a_id, _, token_a = create_org_stand_card(test_db_session, "Org A", "user_a@test.com", None, form_fields)
     org_b_id, _, token_b = create_org_stand_card(test_db_session, "Org B", "user_b@test.com", None, form_fields)
     
-    client.post(f"/tap/{token_a}/submit", json={"consent": True, "data": {"email": "a@example.com"}})
+    client.post(f"/tap/{token_a}/submit", json={"idempotency_key": str(uuid.uuid4()), "consent": True, "data": {"email": "a@example.com"}})
     
     # Query as org B using set_org_context
     test_db_session.execute(text("SET ROLE tapply_app"))
@@ -207,9 +213,66 @@ def test_payload_size_limit(client, test_db_session):
     # Construct a huge payload > 50KB
     huge_string = "a" * (60 * 1024)
     payload = {
+        "idempotency_key": str(uuid.uuid4()),
         "consent": True,
         "data": {"email": "test@example.com", "huge": huge_string}
     }
     
     response = client.post(f"/tap/{token}/submit", json=payload)
     assert response.status_code == 413
+
+def test_post_tap_submit_idempotent_retry(client, test_db_session):
+    form_fields = [{"name": "email", "required": True}]
+    _, _, token = create_org_stand_card(test_db_session, "Org A", "user@test.com", "Branch A", form_fields)
+    
+    idem_key = str(uuid.uuid4())
+    payload = {
+        "idempotency_key": idem_key,
+        "consent": True,
+        "data": {"email": "test@example.com"}
+    }
+    
+    # First submit
+    res1 = client.post(f"/tap/{token}/submit", json=payload)
+    assert res1.status_code == 201
+    data1 = res1.json()
+    assert data1["status"] == "ok"
+    sub_id = data1["submission_id"]
+    
+    # Second submit (retry)
+    res2 = client.post(f"/tap/{token}/submit", json=payload)
+    assert res2.status_code == 200
+    data2 = res2.json()
+    assert data2["status"] == "ok"
+    assert data2["submission_id"] == sub_id
+    
+    # DB should have only 1 row
+    submissions = test_db_session.execute(text("SELECT * FROM submissions")).fetchall()
+    assert len(submissions) == 1
+
+def test_post_tap_submit_cross_org_idempotency_key_collision(client, test_db_session):
+    form_fields = [{"name": "email", "required": True}]
+    org_a_id, _, token_a = create_org_stand_card(test_db_session, "Org A", "user_a@test.com", "Branch A", form_fields)
+    org_b_id, _, token_b = create_org_stand_card(test_db_session, "Org B", "user_b@test.com", "Branch B", form_fields)
+    
+    idem_key = str(uuid.uuid4())
+    
+    payload_a = {
+        "idempotency_key": idem_key,
+        "consent": True,
+        "data": {"email": "a@example.com"}
+    }
+    res_a = client.post(f"/tap/{token_a}/submit", json=payload_a)
+    assert res_a.status_code == 201
+    
+    payload_b = {
+        "idempotency_key": idem_key,
+        "consent": True,
+        "data": {"email": "b@example.com"}
+    }
+    res_b = client.post(f"/tap/{token_b}/submit", json=payload_b)
+    assert res_b.status_code == 201
+    
+    # Both inserts should succeed despite the exact same idempotency_key (since org_id differs)
+    submissions = test_db_session.execute(text("SELECT id FROM submissions")).fetchall()
+    assert len(submissions) == 2

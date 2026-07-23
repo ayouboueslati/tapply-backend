@@ -77,3 +77,23 @@ def test_org_creation_uses_token_email(client, test_db_session):
     
     # Clean up
     del app.dependency_overrides[get_clerk_email]
+
+def test_org_context_unmapped_user(client):
+    app.dependency_overrides[get_clerk_email] = lambda: "unmapped@example.com"
+    response = client.get("/organizations/me/context", headers={"Authorization": "Bearer valid"})
+    assert response.status_code == 403
+    del app.dependency_overrides[get_clerk_email]
+
+def test_org_context_valid_user(client, test_db_session):
+    app.dependency_overrides[get_clerk_email] = lambda: "admin@neworg.com"
+    res_post = client.post("/organizations", json={"name": "Test Context Org"}, headers={"Authorization": "Bearer valid"})
+    assert res_post.status_code == 200
+    
+    res_ctx = client.get("/organizations/me/context", headers={"Authorization": "Bearer valid"})
+    assert res_ctx.status_code == 200
+    data = res_ctx.json()
+    assert data["email"] == "admin@neworg.com"
+    assert data["org_name"] == "Test Context Org"
+    assert data["role"] == "org_owner"
+    assert isinstance(data["form_fields"], list)
+    del app.dependency_overrides[get_clerk_email]

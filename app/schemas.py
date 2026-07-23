@@ -14,6 +14,12 @@ class OrganizationResponse(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
+class StaffContextResponse(BaseModel):
+    email: str
+    org_name: str
+    role: str
+    form_fields: list[dict]
+
 class StandCreate(BaseModel):
     name: str
     default_branch: str | None = None
@@ -31,12 +37,18 @@ class StandResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 class TapContextResponse(BaseModel):
+    org_name: str
     form_fields: list[dict]
     default_branch: str | None
 
 class TapSubmissionCreate(BaseModel):
+    idempotency_key: UUID
     consent: bool
     data: dict
+
+class TapSubmissionResponse(BaseModel):
+    status: str
+    submission_id: UUID
 
 # ── Step 4: Status labels ─────────────────────────────────────────────────────
 
