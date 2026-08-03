@@ -47,7 +47,7 @@ from app.api.deps import get_db, get_clerk_email, get_current_staff_user, StaffU
 from app.models.form_schema import FormSchema
 from app.models.organization import Organization
 from app.models.submission import Submission
-from app.schemas import OrganizationCreate, StatusLabelsResponse, StatusLabelsUpdate, StaffContextResponse
+from app.schemas import OrganizationCreate, StatusLabelsResponse, StatusLabelsUpdate, StaffContextResponse, BranchLabelsResponse, BranchLabelsUpdate
 
 # Maximum allowed length for a single status label (dashboard-facing text).
 _MAX_LABEL_LENGTH = 50
@@ -74,7 +74,7 @@ def create_organization(
             "name": org_in.name,
             "status": "active",
             "email": email,
-            "role": "owner",
+            "role": "org_owner",
         },
     ).one()
 
@@ -246,3 +246,115 @@ def update_status_labels(
     session.commit()
 
     return StatusLabelsResponse(status_labels=new_labels)
+
+
+# ── Step 11: Branch labels (Mirrors Status Labels) ──────────────────────────
+
+@router.get("/me/branches", response_model=BranchLabelsResponse)
+def get_branch_labels(
+    staff: StaffUserContext = Depends(get_current_staff_user),
+    session: Session = Depends(get_db),
+):
+    """
+    Returns the caller's org's current ordered branch label list.
+
+    Any authenticated staff role (org_owner or regular staff) may call this.
+    RLS ensures only the caller's own org row is visible.
+    """
+    org = session.get(Organization, staff.org_id)
+    if not org:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Organization not found",
+        )
+    return BranchLabelsResponse(branch_labels=org.branch_labels)
+
+
+@router.patch("/me/branches", response_model=BranchLabelsResponse)
+def update_branch_labels(
+    body: BranchLabelsUpdate,
+    staff: StaffUserContext = Depends(get_current_staff_user),
+    session: Session = Depends(get_db),
+):
+    """
+    Replaces the caller's org's branch label list (org_owner role only).
+    Mirrors the atomicity and validation rules of status labels exactly.
+    """
+    # ── Role check ────────────────────────────────────────────────────────────
+    if staff.role != "org_owner":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only org_owner role may manage branch labels",
+        )
+
+    new_labels = body.branch_labels
+
+    # ── Input validation (runs before any DB query) ───────────────────────────
+
+    # 1. Non-empty
+    if not new_labels:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="branch_labels must not be empty",
+        )
+
+    # 2. No duplicates (case-sensitive)
+    seen: Set[str] = set()
+    for label in new_labels:
+        if label in seen:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Duplicate label: {label!r}",
+            )
+        seen.add(label)
+
+    # 3. Length cap
+    too_long = [lbl for lbl in new_labels if len(lbl) > _MAX_LABEL_LENGTH]
+    if too_long:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"Labels must be ≤ {_MAX_LABEL_LENGTH} characters. "
+                f"Offending: {too_long}"
+            ),
+        )
+
+    # ── Fetch current labels ──────────────────────────────────────────────────
+    org = session.get(Organization, staff.org_id)
+    if not org:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Organization not found",
+        )
+
+    current_labels: Set[str] = set(org.branch_labels)
+    incoming_labels: Set[str] = set(new_labels)
+    removed_labels: Set[str] = current_labels - incoming_labels
+
+    # ── In-use check (real DB query, not trust-the-caller) ───────────────────
+    # Query for ALL removed labels in a single round-trip.  If *any* of them
+    # are referenced by an existing submission the whole request is rejected.
+    if removed_labels:
+        in_use = session.scalars(
+            select(Submission.branch)
+            .where(Submission.org_id == staff.org_id)
+            .where(Submission.branch.in_(removed_labels))
+            .distinct()
+        ).all()
+
+        if in_use:
+            labels_str = ", ".join(f'"{label}"' for label in sorted(in_use))
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    f"Cannot remove {labels_str}. This branch is still "
+                    "referenced by existing submissions. Please move those submissions "
+                    "to a different branch first, then try again."
+                ),
+            )
+
+    # ── Write — only reached if all checks pass ───────────────────────────────
+    org.branch_labels = new_labels
+    session.commit()
+
+    return BranchLabelsResponse(branch_labels=new_labels)

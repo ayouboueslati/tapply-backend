@@ -36,6 +36,16 @@ class StandResponse(BaseModel):
     
     model_config = ConfigDict(from_attributes=True)
 
+
+class CardResponse(BaseModel):
+    """Card returned by GET /cards — exposes the tap token so staff can share tap links."""
+    id: UUID
+    stand_id: UUID
+    stand_name: str   # denormalized from the joined Stand for display convenience
+    token: str
+
+    model_config = ConfigDict(from_attributes=True)
+
 class TapContextResponse(BaseModel):
     org_name: str
     form_fields: list[dict]
@@ -76,6 +86,28 @@ class StatusLabelsUpdate(BaseModel):
     status_labels: List[str]
 
 
+class BranchLabelsResponse(BaseModel):
+    """Response body for GET /organizations/me/branches."""
+    branch_labels: List[str]
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class BranchLabelsUpdate(BaseModel):
+    """
+    Request body for PATCH /organizations/me/branches.
+
+    Validation rules mirror status_labels exactly:
+    - List must be non-empty.
+    - No duplicate entries (case-sensitive).
+    - Each label must be ≤ 50 characters.
+
+    Orphan protection: like status labels, removing a branch label currently
+    assigned to any submission is rejected with 409.
+    """
+    branch_labels: List[str]
+
+
 # ── Step 4: Submission read / update ─────────────────────────────────────────
 
 class SubmissionUpdate(BaseModel):
@@ -114,3 +146,22 @@ class SubmissionListResponse(BaseModel):
     total: int
     limit: int
     offset: int
+
+
+# ── Step 12: Staff / Team management ─────────────────────────────────────────
+
+class StaffMemberResponse(BaseModel):
+    id: UUID
+    email: str
+    role: str
+    can_edit: bool
+    can_edit_until: Optional[datetime]
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class StaffPermissionUpdate(BaseModel):
+    can_edit: bool
+    can_edit_until: Optional[datetime] = None
+

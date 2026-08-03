@@ -62,6 +62,16 @@ class Organization(Base):
             "Application-level validation — not a DB enum — see DESIGN.md."
         ),
     )
+    branch_labels: Mapped[List[str]] = mapped_column(
+        JSONB,
+        nullable=False,
+        server_default=text("'[]'::jsonb"),
+        default=lambda: [],
+        doc=(
+            "List of valid branch names for this org (for dashboard filtering/tabs). "
+            "Managed via PATCH /organizations/me/branches (org_owner only)."
+        ),
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,

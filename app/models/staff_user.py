@@ -52,6 +52,16 @@ class StaffUser(Base):
         nullable=False,
         doc="Staff role: 'owner' | 'manager' | 'staff'.",
     )
+    can_edit: Mapped[bool] = mapped_column(
+        nullable=False,
+        server_default=text("false"),
+        doc="If true, this staff member can update/delete submissions.",
+    )
+    can_edit_until: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        doc="If set, can_edit auto-expires after this time. NULL means permanent.",
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,

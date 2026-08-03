@@ -37,7 +37,7 @@ async def verify_payload_size(request: Request):
 
 def _resolve_context(session: Session, token: str):
     row = session.execute(
-        text("SELECT org_id, stand_id, default_branch, form_fields, org_name FROM auth.resolve_card_context(:token)"),
+        text("SELECT org_id, stand_id, default_branch, form_fields, org_name, branch_labels FROM auth.resolve_card_context(:token)"),
         {"token": token},
     ).one_or_none()
 
@@ -50,9 +50,17 @@ def _resolve_context(session: Session, token: str):
 @limiter.limit("30/minute")
 def get_tap_context(request: Request, token: str, session: Session = Depends(get_db)):
     row = _resolve_context(session, token)
+    
+    # Inject dynamic branch labels if they exist
+    form_fields = row.form_fields
+    if isinstance(form_fields, list) and row.branch_labels:
+        for field in form_fields:
+            if field.get("name") == "branch":
+                field["options"] = row.branch_labels
+
     return TapContextResponse(
         org_name=row.org_name,
-        form_fields=row.form_fields,
+        form_fields=form_fields,
         default_branch=row.default_branch
     )
 
@@ -88,6 +96,26 @@ def submit_tap(
 
     # Branch precedence: explicit client branch over default_branch
     branch = payload.data.get("branch", row.default_branch)
+
+    # Duplicate submission check by email within 5 minutes
+    email = payload.data.get("email")
+    if email:
+        duplicate = session.execute(
+            text("""
+                SELECT id FROM submissions
+                WHERE org_id = :org_id
+                  AND data->>'email' = :email
+                  AND created_at >= NOW() - INTERVAL '5 minutes'
+                LIMIT 1
+            """),
+            {"org_id": row.org_id, "email": email}
+        ).one_or_none()
+        
+        if duplicate:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="You have already submitted this form recently. Please wait a few minutes before trying again."
+            )
 
     # Set context before INSERT to satisfy RLS WITH CHECK policy
     set_org_context(session, row.org_id)
