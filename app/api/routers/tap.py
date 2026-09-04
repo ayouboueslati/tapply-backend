@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, status, Request, Response, BackgroundTasks
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 from app.db.session import set_org_context
@@ -37,12 +37,15 @@ async def verify_payload_size(request: Request):
 
 def _resolve_context(session: Session, token: str):
     row = session.execute(
-        text("SELECT org_id, stand_id, default_branch, form_fields, org_name, branch_labels FROM auth.resolve_card_context(:token)"),
+        text("SELECT org_id, stand_id, default_branch, form_fields, org_name, branch_labels, logo_url, theme_color, welcome_title, welcome_text, is_active, assigned_recruiter_id FROM auth.resolve_card_context(:token)"),
         {"token": token},
     ).one_or_none()
 
     if not row:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Card not found")
+        
+    if not row.is_active:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="This card has been deactivated.")
     
     return row
 
@@ -61,7 +64,11 @@ def get_tap_context(request: Request, token: str, session: Session = Depends(get
     return TapContextResponse(
         org_name=row.org_name,
         form_fields=form_fields,
-        default_branch=row.default_branch
+        default_branch=row.default_branch,
+        logo_url=row.logo_url,
+        theme_color=row.theme_color,
+        welcome_title=row.welcome_title,
+        welcome_text=row.welcome_text,
     )
 
 @router.post("/{token}/submit", response_model=TapSubmissionResponse)
@@ -71,6 +78,7 @@ def submit_tap(
     token: str,
     payload: TapSubmissionCreate,
     response: Response,
+    background_tasks: BackgroundTasks,
     session: Session = Depends(get_db),
     _ = Depends(verify_payload_size)
 ):
@@ -123,14 +131,15 @@ def submit_tap(
     # Insert submission
     result = session.execute(
         text("""
-            INSERT INTO submissions (card_id, org_id, status, branch, data, idempotency_key)
+            INSERT INTO submissions (card_id, org_id, status, branch, data, idempotency_key, assigned_to)
             VALUES (
                 (SELECT id FROM cards WHERE token = :token),
                 :org_id,
                 'to_contact',
                 :branch,
                 :data,
-                :idempotency_key
+                :idempotency_key,
+                :assigned_to
             )
             ON CONFLICT (org_id, idempotency_key) DO UPDATE SET id = submissions.id
             RETURNING id, (xmax = 0) AS inserted
@@ -140,7 +149,8 @@ def submit_tap(
             "org_id": row.org_id,
             "branch": branch,
             "data": json.dumps(payload.data),
-            "idempotency_key": str(payload.idempotency_key)
+            "idempotency_key": str(payload.idempotency_key),
+            "assigned_to": row.assigned_recruiter_id
         }
     )
     
@@ -155,7 +165,32 @@ def submit_tap(
     
     if inserted:
         response.status_code = status.HTTP_201_CREATED
+        # Enqueue the confirmation email task
+        if email:
+            background_tasks.add_task(
+                send_confirmation_email,
+                email,
+                row.org_name,
+                row.org_id
+            )
     else:
         response.status_code = status.HTTP_200_OK
         
     return {"status": "ok", "submission_id": submission_id}
+
+# Stub for Phase 1 email integration
+def send_confirmation_email(to_email: str, org_name: str, org_id: str):
+    """
+    Sends a confirmation email using Resend.
+    Currently stubbed out until the Resend API key is configured.
+    """
+    print(f"DEBUG: [Resend stub] Sending confirmation email to {to_email} for org {org_name}")
+    # TODO: Implement actual Resend SDK call here
+    # import resend
+    # resend.api_key = os.environ["RESEND_API_KEY"]
+    # resend.Emails.send({
+    #     "from": f"{org_name} <hello@tapply.io>",
+    #     "to": [to_email],
+    #     "subject": f"Thanks for connecting with {org_name}",
+    #     "html": f"<p>Hi there, thanks for tapping our card!</p>"
+    # })

@@ -16,12 +16,21 @@ from slowapi.middleware import SlowAPIMiddleware
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
+from app.jobs import start_jobs, shutdown_jobs
 
 limiter = Limiter(key_func=get_remote_address)
 
 _docs_url = None if settings.ENV == "production" else "/docs"
 _redoc_url = None if settings.ENV == "production" else "/redoc"
 _openapi_url = None if settings.ENV == "production" else "/openapi.json"
+
+from contextlib import asynccontextmanager
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    start_jobs()
+    yield
+    shutdown_jobs()
 
 app = FastAPI(
     title="Tapply API",
@@ -30,6 +39,7 @@ app = FastAPI(
     docs_url=_docs_url,
     redoc_url=_redoc_url,
     openapi_url=_openapi_url,
+    lifespan=lifespan,
 )
 
 app.state.limiter = limiter

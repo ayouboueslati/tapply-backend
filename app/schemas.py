@@ -43,13 +43,23 @@ class CardResponse(BaseModel):
     stand_id: UUID
     stand_name: str   # denormalized from the joined Stand for display convenience
     token: str
+    is_active: bool
+    assigned_recruiter_id: Optional[UUID] = None
 
     model_config = ConfigDict(from_attributes=True)
+
+class CardUpdate(BaseModel):
+    is_active: Optional[bool] = None
+    assigned_recruiter_id: Optional[UUID] = None
 
 class TapContextResponse(BaseModel):
     org_name: str
     form_fields: list[dict]
     default_branch: str | None
+    logo_url: str | None = None
+    theme_color: str = "#C9A96E"
+    welcome_title: str = "Choose Your Path"
+    welcome_text: str = "Find the programme that ignites your ambition."
 
 class TapSubmissionCreate(BaseModel):
     idempotency_key: UUID
@@ -108,6 +118,45 @@ class BranchLabelsUpdate(BaseModel):
     branch_labels: List[str]
 
 
+# ── Branding ─────────────────────────────────────────────────────────────────
+
+class BrandingResponse(BaseModel):
+    """Response for GET /organizations/me/branding."""
+    logo_url: Optional[str]
+    theme_color: str
+    welcome_title: str
+    welcome_text: str
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class BrandingUpdate(BaseModel):
+    """
+    Request body for PATCH /organizations/me/branding.
+    All fields optional — only supplied fields are updated.
+    """
+    logo_url: Optional[str] = None
+    theme_color: Optional[str] = None
+    welcome_title: Optional[str] = None
+    welcome_text: Optional[str] = None
+
+
+# ── Form Schema ───────────────────────────────────────────────────────────────
+
+class FormSchemaResponse(BaseModel):
+    """Response for GET /organizations/me/form-schema."""
+    fields: list[dict]
+
+
+class FormSchemaUpdate(BaseModel):
+    """
+    Request body for PATCH /organizations/me/form-schema.
+    Replaces the entire fields array.
+    Each field must be a dict with at least {name, type}.
+    """
+    fields: list[dict]
+
+
 # ── Step 4: Submission read / update ─────────────────────────────────────────
 
 class SubmissionUpdate(BaseModel):
@@ -125,6 +174,10 @@ class SubmissionUpdate(BaseModel):
     """
     status: Optional[str] = None
     branch: Optional[str] = None
+    assigned_to: Optional[UUID] = None
+    score: Optional[int] = None
+    notes: Optional[list] = None
+    is_duplicate: Optional[bool] = None
 
 
 class SubmissionResponse(BaseModel):
@@ -135,6 +188,10 @@ class SubmissionResponse(BaseModel):
     status: str
     branch: Optional[str]
     data: dict
+    assigned_to: Optional[UUID] = None
+    score: Optional[int] = None
+    notes: list
+    is_duplicate: bool
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)

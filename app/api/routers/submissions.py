@@ -171,6 +171,18 @@ def update_submission(
         # Free text — no validation (consistent with Step 3 tap submission).
         submission.branch = body.branch
 
+    if body.assigned_to is not None:
+        submission.assigned_to = body.assigned_to
+    
+    if body.score is not None:
+        submission.score = body.score
+        
+    if body.notes is not None:
+        submission.notes = body.notes
+        
+    if body.is_duplicate is not None:
+        submission.is_duplicate = body.is_duplicate
+
     session.commit()
 
     return submission

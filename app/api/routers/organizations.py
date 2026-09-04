@@ -47,7 +47,11 @@ from app.api.deps import get_db, get_clerk_email, get_current_staff_user, StaffU
 from app.models.form_schema import FormSchema
 from app.models.organization import Organization
 from app.models.submission import Submission
-from app.schemas import OrganizationCreate, StatusLabelsResponse, StatusLabelsUpdate, StaffContextResponse, BranchLabelsResponse, BranchLabelsUpdate
+from app.schemas import (
+    OrganizationCreate, StatusLabelsResponse, StatusLabelsUpdate,
+    StaffContextResponse, BranchLabelsResponse, BranchLabelsUpdate,
+    BrandingResponse, BrandingUpdate, FormSchemaResponse, FormSchemaUpdate,
+)
 
 # Maximum allowed length for a single status label (dashboard-facing text).
 _MAX_LABEL_LENGTH = 50
@@ -358,3 +362,115 @@ def update_branch_labels(
     session.commit()
 
     return BranchLabelsResponse(branch_labels=new_labels)
+
+
+# ── Branding endpoints ───────────────────────────────────────────────────────────
+
+@router.get("/me/branding", response_model=BrandingResponse)
+def get_branding(
+    staff: StaffUserContext = Depends(get_current_staff_user),
+    session: Session = Depends(get_db),
+):
+    """Returns the caller's org branding settings."""
+    org = session.get(Organization, staff.org_id)
+    if not org:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Organization not found")
+    return org
+
+
+@router.patch("/me/branding", response_model=BrandingResponse)
+def update_branding(
+    body: BrandingUpdate,
+    staff: StaffUserContext = Depends(get_current_staff_user),
+    session: Session = Depends(get_db),
+):
+    """
+    Update branding fields. org_owner only.
+    Only fields explicitly supplied in the request body are updated.
+    """
+    if staff.role != "org_owner":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only org_owner may update branding")
+
+    org = session.get(Organization, staff.org_id)
+    if not org:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Organization not found")
+
+    if body.logo_url is not None:
+        org.logo_url = body.logo_url
+    if body.theme_color is not None:
+        if not body.theme_color.startswith("#") or len(body.theme_color) not in (4, 7):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="theme_color must be a valid hex color (e.g. #C9A96E)")
+        org.theme_color = body.theme_color
+    if body.welcome_title is not None:
+        org.welcome_title = body.welcome_title
+    if body.welcome_text is not None:
+        org.welcome_text = body.welcome_text
+
+    session.commit()
+    return org
+
+
+# ── Form Schema endpoints ──────────────────────────────────────────────────────────
+
+_VALID_FIELD_TYPES = {"text", "email", "phone", "date", "select", "textarea", "number"}
+
+@router.get("/me/form-schema", response_model=FormSchemaResponse)
+def get_form_schema(
+    staff: StaffUserContext = Depends(get_current_staff_user),
+    session: Session = Depends(get_db),
+):
+    """Returns the caller's org's current form schema."""
+    from sqlalchemy import select
+    schema = session.scalar(select(FormSchema).where(FormSchema.org_id == staff.org_id))
+    if not schema:
+        return FormSchemaResponse(fields=[])
+    return FormSchemaResponse(fields=schema.fields)
+
+
+@router.patch("/me/form-schema", response_model=FormSchemaResponse)
+def update_form_schema(
+    body: FormSchemaUpdate,
+    staff: StaffUserContext = Depends(get_current_staff_user),
+    session: Session = Depends(get_db),
+):
+    """
+    Replace the org's entire form field list. org_owner only.
+
+    Each field must be a dict containing at minimum:
+      { "name": str, "type": str }
+
+    Supported types: text, email, phone, date, select, textarea, number.
+    "select" fields must include an "options" list.
+    """
+    if staff.role != "org_owner":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only org_owner may edit the form schema")
+
+    if not body.fields:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="fields must not be empty")
+
+    # Validate each field descriptor
+    seen_names: set[str] = set()
+    for i, field in enumerate(body.fields):
+        name = field.get("name")
+        ftype = field.get("type")
+        if not name or not isinstance(name, str):
+            raise HTTPException(status_code=400, detail=f"Field {i}: 'name' is required and must be a string")
+        if name in seen_names:
+            raise HTTPException(status_code=400, detail=f"Field {i}: duplicate name '{name}'")
+        seen_names.add(name)
+        if ftype not in _VALID_FIELD_TYPES:
+            raise HTTPException(status_code=400, detail=f"Field '{name}': invalid type '{ftype}'. Valid: {sorted(_VALID_FIELD_TYPES)}")
+        if ftype == "select" and not isinstance(field.get("options"), list):
+            raise HTTPException(status_code=400, detail=f"Field '{name}': select fields must include an 'options' list")
+
+    from sqlalchemy import select as sql_select
+    schema = session.scalar(sql_select(FormSchema).where(FormSchema.org_id == staff.org_id))
+
+    if schema:
+        schema.fields = body.fields
+    else:
+        schema = FormSchema(org_id=staff.org_id, fields=body.fields)
+        session.add(schema)
+
+    session.commit()
+    return FormSchemaResponse(fields=schema.fields)

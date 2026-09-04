@@ -50,6 +50,15 @@ class Card(Base):
             "Generated via secrets.token_urlsafe(16) — never sequential."
         ),
     )
+    is_active: Mapped[bool] = mapped_column(
+        nullable=False,
+        server_default=text("true"),
+    )
+    assigned_recruiter_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("staff_users.id", ondelete="SET NULL"),
+        nullable=True,
+    )
 
     def __repr__(self) -> str:
         return f"<Card id={self.id} token={self.token!r}>"

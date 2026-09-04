@@ -20,7 +20,7 @@ from sqlalchemy.orm import Session
 from app.api.deps import get_db, get_current_staff_user, StaffUserContext
 from app.models.card import Card
 from app.models.stand import Stand
-from app.schemas import CardResponse
+from app.schemas import CardResponse, CardUpdate
 
 router = APIRouter(prefix="/cards", tags=["cards"])
 
@@ -51,6 +51,48 @@ def list_cards(
             stand_id=card.stand_id,
             stand_name=stand_name,
             token=card.token,
+            is_active=card.is_active,
+            assigned_recruiter_id=card.assigned_recruiter_id
         )
         for card, stand_name in rows
     ]
+
+@router.patch("/{card_id}", response_model=CardResponse)
+def update_card(
+    card_id: str,
+    payload: CardUpdate,
+    staff: StaffUserContext = Depends(get_current_staff_user),
+    session: Session = Depends(get_db),
+):
+    from fastapi import HTTPException, status
+    if not staff.can_edit:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to edit cards.")
+
+    # Using the same subquery logic implicitly through RLS by just selecting the Card
+    row = session.execute(
+        select(Card, Stand.name.label("stand_name"))
+        .join(Stand, Card.stand_id == Stand.id)
+        .where(Card.id == card_id)
+    ).first()
+
+    if not row:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Card not found.")
+
+    card, stand_name = row
+
+    if payload.is_active is not None:
+        card.is_active = payload.is_active
+    if payload.assigned_recruiter_id is not None:
+        card.assigned_recruiter_id = payload.assigned_recruiter_id
+
+    session.commit()
+    session.refresh(card)
+
+    return CardResponse(
+        id=card.id,
+        stand_id=card.stand_id,
+        stand_name=stand_name,
+        token=card.token,
+        is_active=card.is_active,
+        assigned_recruiter_id=card.assigned_recruiter_id
+    )

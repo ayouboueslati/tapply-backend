@@ -64,6 +64,24 @@ class Submission(Base):
         nullable=False,
         doc="Customer-submitted form payload matching the org's FormSchema.",
     )
+    assigned_to: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("staff_users.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    score: Mapped[int | None] = mapped_column(
+        nullable=True,
+    )
+    notes: Mapped[list] = mapped_column(
+        JSONB,
+        nullable=False,
+        server_default=text("'[]'::jsonb"),
+        default=lambda: [],
+    )
+    is_duplicate: Mapped[bool] = mapped_column(
+        nullable=False,
+        server_default=text("false"),
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,

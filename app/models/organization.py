@@ -42,6 +42,29 @@ class Organization(Base):
         nullable=False,
         doc="Human-readable display name for the organization.",
     )
+    logo_url: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+        doc="URL to the organization's logo.",
+    )
+    theme_color: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+        server_default=text("'''#C9A96E'''"),
+        doc="Primary hex color for the public form.",
+    )
+    welcome_title: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+        server_default=text("'''Choose Your Path'''"),
+        doc="Main heading on the public tap form.",
+    )
+    welcome_text: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+        server_default=text("'''Find the programme that ignites your ambition.'''"),
+        doc="Subtext under the main heading on the public form.",
+    )
     billing_status: Mapped[str] = mapped_column(
         Text,
         nullable=False,
@@ -76,6 +99,10 @@ class Organization(Base):
         DateTime(timezone=True),
         nullable=False,
         server_default=func.now(),
+    )
+    retention_days: Mapped[int] = mapped_column(
+        nullable=False,
+        server_default=text("365"),
     )
 
     def __repr__(self) -> str:

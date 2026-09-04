@@ -9,7 +9,7 @@ Multi-tenant SaaS backend. Built with FastAPI + PostgreSQL + SQLAlchemy + Alembi
 - Python 3.11+
 - PostgreSQL 14+ (RLS policies and `gen_random_uuid()` require pg14+)
 - A PostgreSQL database created for the app and one for tests
-
+  
 ---
 
 ## First-time Setup
