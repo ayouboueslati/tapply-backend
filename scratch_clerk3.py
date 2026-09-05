@@ -1,2 +1,0 @@
-import clerk_backend_api
-help(clerk_backend_api.Clerk.authenticate_request)
