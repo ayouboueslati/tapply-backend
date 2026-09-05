@@ -1,3 +1,4 @@
+import logging
 from fastapi import APIRouter, Depends, HTTPException, status, Request, Response, BackgroundTasks
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -6,6 +7,7 @@ from app.api.deps import get_db
 from app.schemas import TapContextResponse, TapSubmissionCreate, TapSubmissionResponse
 import json
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/tap", tags=["tap"])
 
 # We import the limiter from main, but since it's attached to request.app.state.limiter we can use a decorator
@@ -184,7 +186,7 @@ def send_confirmation_email(to_email: str, org_name: str, org_id: str):
     Sends a confirmation email using Resend.
     Currently stubbed out until the Resend API key is configured.
     """
-    print(f"DEBUG: [Resend stub] Sending confirmation email to {to_email} for org {org_name}")
+    logger.info(f"[Resend stub] Sending confirmation email to {to_email} for org {org_name}")
     # TODO: Implement actual Resend SDK call here
     # import resend
     # resend.api_key = os.environ["RESEND_API_KEY"]

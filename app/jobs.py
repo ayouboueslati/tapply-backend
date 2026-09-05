@@ -1,13 +1,16 @@
+import logging
 from apscheduler.schedulers.background import BackgroundScheduler
 from sqlalchemy import text
 from app.db.session import SessionLocal
+
+logger = logging.getLogger(__name__)
 
 def purge_old_data():
     """
     Deletes submissions older than the organization's retention_days.
     This runs daily.
     """
-    print("Running data retention purge job...")
+    logger.info("Running data retention purge job...")
     with SessionLocal() as db:
         # We find submissions where created_at is older than retention_days
         # Using Postgres interval logic
@@ -21,9 +24,9 @@ def purge_old_data():
             """))
             deleted_count = result.rowcount
             db.commit()
-            print(f"Purged {deleted_count} old submissions.")
+            logger.info(f"Purged {deleted_count} old submissions.")
         except Exception as e:
-            print(f"Error purging old data: {e}")
+            logger.error(f"Error purging old data: {e}")
             db.rollback()
 
 scheduler = BackgroundScheduler()
