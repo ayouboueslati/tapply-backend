@@ -15,9 +15,6 @@ branch_labels = None
 depends_on = None
 
 def upgrade() -> None:
-    # TODO: organizations.billing_status is NOT checked. A suspended/inactive
-    # organization's card will still resolve and accept submissions. This is
-    # deferred until the billing model is finalized.
     op.execute("""
         CREATE OR REPLACE FUNCTION auth.resolve_card_context(p_token TEXT)
         RETURNS TABLE (org_id UUID, stand_id UUID, default_branch TEXT, form_fields JSONB)

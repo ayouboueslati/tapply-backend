@@ -42,7 +42,7 @@ def reset_limiter():
     limiter._storage.reset()
     yield
 
-def create_org_stand_card(session, org_name, email, default_branch, form_fields):
+def create_org_stand_card(session, org_name, email, default_branch, form_fields, billing_status="active"):
     # Bypass RLS to create data directly for setup
     row = session.execute(
         text(
@@ -57,6 +57,13 @@ def create_org_stand_card(session, org_name, email, default_branch, form_fields)
         },
     ).one()
     org_id = row.org_id
+    
+    if billing_status != "active":
+        session.execute(
+            text("UPDATE organizations SET billing_status = :bs WHERE id = :org_id"),
+            {"bs": billing_status, "org_id": org_id}
+        )
+
     session.commit()
 
     # Create form_schema
@@ -276,3 +283,22 @@ def test_post_tap_submit_cross_org_idempotency_key_collision(client, test_db_ses
     # Both inserts should succeed despite the exact same idempotency_key (since org_id differs)
     submissions = test_db_session.execute(text("SELECT id FROM submissions")).fetchall()
     assert len(submissions) == 2
+
+def test_get_tap_inactive_billing_status(client, test_db_session):
+    form_fields = [{"name": "email", "required": True}]
+    _, _, token = create_org_stand_card(test_db_session, "Org A", "user@test.com", "Branch A", form_fields, billing_status="past_due")
+    
+    response = client.get(f"/tap/{token}")
+    assert response.status_code == 404
+
+def test_post_tap_submit_inactive_billing_status(client, test_db_session):
+    form_fields = [{"name": "email", "required": True}]
+    _, _, token = create_org_stand_card(test_db_session, "Org A", "user@test.com", "Branch A", form_fields, billing_status="canceled")
+    
+    payload = {
+        "idempotency_key": str(uuid.uuid4()),
+        "consent": True,
+        "data": {"email": "test@example.com"}
+    }
+    response = client.post(f"/tap/{token}/submit", json=payload)
+    assert response.status_code == 404
